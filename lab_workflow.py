@@ -47,8 +47,14 @@ def yolo_to_box(label, yolo):
     values = [(xc - w / 2) * 1000, (yc - h / 2) * 1000,
               (xc + w / 2) * 1000, (yc + h / 2) * 1000]
     box = [round(max(0, min(1000, value))) for value in values]
-    if box[2] <= box[0] or box[3] <= box[1]:
-        raise ValueError(f"degenerate box after rounding: {box}")
+    # A valid but sub-0.001 YOLO width/height can collapse when rounded.
+    # Keep the required integer 0–1000 format with the smallest valid box.
+    for low, high in ((0, 2), (1, 3)):
+        if box[high] <= box[low]:
+            if box[low] == 1000:
+                box[low] = 999
+            else:
+                box[high] = box[low] + 1
     return {"label": label, "bbox_2d": box}
 
 

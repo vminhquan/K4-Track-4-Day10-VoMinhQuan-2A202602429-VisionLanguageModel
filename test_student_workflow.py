@@ -16,6 +16,12 @@ class GroundingLabelTests(unittest.TestCase):
             [0, 400, 120, 600],
         )
 
+    def test_thin_box_remains_valid_after_rounding(self):
+        self.assertEqual(
+            yolo_to_box("crack", [0.639, 0.7863, 0.004, 0.0001])["bbox_2d"],
+            [637, 786, 641, 787],
+        )
+
     def test_order_and_empty(self):
         rows = [
             {"label": "crack", "yolo": [0.5, 0.5, 0.2, 0.2]},
