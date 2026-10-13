@@ -418,7 +418,6 @@ def train_grpo(best, data_dir="data"):
     model, processor = load_sft(Path("work") / best, trainable=True)
     model.config.use_cache = False
     processor.tokenizer.padding_side = "left"
-    record_base = json.loads((Path("work") / best / "run.json").read_text())
     args = GRPOConfig(
         output_dir="work/e5_trainer", max_steps=60, learning_rate=5e-6,
         num_generations=4, max_completion_length=128, beta=0.0,
