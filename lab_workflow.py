@@ -144,7 +144,9 @@ def quantized_model():
     quant = BitsAndBytesConfig(
         load_in_4bit=True, bnb_4bit_quant_type="nf4",
         bnb_4bit_compute_dtype=torch.float16, bnb_4bit_use_double_quant=True,
-        llm_int8_skip_modules=["visual", "lm_head"])
+        # Transformers 5.19 matches skip entries against the full module path.
+        # Qwen3-VL's vision tower is named model.visual, not visual.
+        llm_int8_skip_modules=["model.visual", "lm_head"])
     model = Qwen3VLForConditionalGeneration.from_pretrained(
         MODEL_ID, quantization_config=quant, dtype=torch.float16,
         device_map={"": torch.cuda.current_device()})
