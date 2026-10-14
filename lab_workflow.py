@@ -438,8 +438,27 @@ def train_grpo(best, data_dir="data"):
     )
     torch.cuda.reset_peak_memory_stats()
     began = time.monotonic()
-    trainer = GRPOTrainer(model=model, processing_class=processor, args=args,
-                          train_dataset=dataset, reward_funcs=trl_reward)
+    class FP16VisionGRPOTrainer(GRPOTrainer):
+        def _generate_single_turn(self, prompt_ids, images, multimodal_fields):
+            # TRL's regular generation path bypasses Trainer's fp16 autocast.
+            # Qwen3-VL's fp16 visual tower and float32 projector need the same
+            # autocast used by SFT inference and the GRPO training forward pass.
+            with torch.autocast("cuda", dtype=torch.float16):
+                return super()._generate_single_turn(prompt_ids, images, multimodal_fields)
+
+    trainer = FP16VisionGRPOTrainer(model=model, processing_class=processor, args=args,
+                                   train_dataset=dataset, reward_funcs=trl_reward)
+    # TRL 1.9.2 casts every trainable parameter to bf16 for QLoRA, including
+    # Qwen3-VL's full projector. Restore its required float32 weights before
+    # optimizer creation; only LoRA adapter weights retain TRL's bf16 dtype.
+    restored = 0
+    for name, param in trainer.model.named_parameters():
+        if PROJECTOR.search(name) and param.requires_grad:
+            param.data = param.data.float()
+            restored += param.numel()
+    if not 100_000_000 < restored < 120_000_000:
+        raise RuntimeError(f"GRPO projector restoration failed: {restored} parameters")
+    print(f"GRPO float32 projector: {restored} parameters", flush=True)
     trainer.train()
     trained = trainer.accelerator.unwrap_model(trainer.model)
     record = {"name": "E5", "source_setup": best, "max_steps": 60,
