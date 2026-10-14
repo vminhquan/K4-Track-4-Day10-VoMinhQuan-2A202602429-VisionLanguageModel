@@ -448,17 +448,23 @@ def train_grpo(best, data_dir="data"):
 
     trainer = FP16VisionGRPOTrainer(model=model, processing_class=processor, args=args,
                                    train_dataset=dataset, reward_funcs=trl_reward)
-    # TRL 1.9.2 casts every trainable parameter to bf16 for QLoRA, including
-    # Qwen3-VL's full projector. Restore its required float32 weights before
-    # optimizer creation; only LoRA adapter weights retain TRL's bf16 dtype.
+    # TRL 1.9.2 casts every trainable QLoRA parameter to bf16, including the
+    # full projector. T4 uses fp16 AMP here, whose GradScaler cannot unscale
+    # bf16 gradients. Restore fp32 master weights before optimizer creation,
+    # as in the SFT loop; autocast still computes the forward pass in fp16.
     restored = 0
+    projector_restored = 0
     for name, param in trainer.model.named_parameters():
-        if PROJECTOR.search(name) and param.requires_grad:
+        if param.requires_grad:
             param.data = param.data.float()
             restored += param.numel()
-    if not 100_000_000 < restored < 120_000_000:
-        raise RuntimeError(f"GRPO projector restoration failed: {restored} parameters")
-    print(f"GRPO float32 projector: {restored} parameters", flush=True)
+            if PROJECTOR.search(name):
+                projector_restored += param.numel()
+    if not 100_000_000 < projector_restored < 120_000_000:
+        raise RuntimeError(f"GRPO projector restoration failed: {projector_restored} parameters")
+    if any(p.dtype != torch.float32 for p in trainer.model.parameters() if p.requires_grad):
+        raise RuntimeError("GRPO trainable weights are not all float32")
+    print(f"GRPO float32 trainable: {restored}; projector: {projector_restored}", flush=True)
     trainer.train()
     trained = trainer.accelerator.unwrap_model(trainer.model)
     record = {"name": "E5", "source_setup": best, "max_steps": 60,
